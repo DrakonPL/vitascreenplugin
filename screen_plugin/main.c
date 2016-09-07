@@ -1,21 +1,3 @@
-/*
-	Vitamin
-	Copyright (C) 2016, Team FreeK (TheFloW, Major Tom, mr. gas)
-
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -25,10 +7,17 @@
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
+#include <psp2/net/net.h>
+#include <psp2/net/netctl.h>
+#include <psp2/sysmodule.h>
 #include <psp2/appmgr.h>
 #include <psp2/display.h>
 #include <psp2/kernel/modulemgr.h>
 #include <psp2/kernel/processmgr.h>
+
+#define ip_server "192.168.0.12"
+#define port_server 18194
+int ret;
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
@@ -41,6 +30,138 @@ int ram_mode = 0;
 #define GREEN 0x00007F00
 #define BLUE 0x007F3F1F
 #define PURPLE 0x007F1F7F
+
+#define NET_INIT_SIZE 1*1024*1024
+
+#define NONE 0
+#define INFO 1
+#define ERROR 2
+#define DEBUG 3	
+
+
+static int debugnet_initialized=0;
+int SocketFD = -1;
+static void *net_memory = NULL;
+static SceNetInAddr vita_addr;
+struct SceNetSockaddrIn stSockAddr;
+int sceClibVsnprintf(char *, SceSize, const char *, va_list); 
+int logLevel=INFO;
+
+void debugNetSendData(unsigned char* buffer,int size)
+{
+  sceNetSendto(SocketFD, buffer, size, 0, (struct SceNetSockaddr *)&stSockAddr, sizeof stSockAddr);
+}
+
+void debugNetUDPPrintf(const char* fmt, ...)
+{
+  char buffer[0x800];
+  va_list arg;
+  va_start(arg, fmt);
+  sceClibVsnprintf(buffer, sizeof(buffer), fmt, arg);
+  va_end(arg);
+  sceNetSendto(SocketFD, buffer, strlen(buffer), 0, (struct SceNetSockaddr *)&stSockAddr, sizeof stSockAddr);
+}
+
+void debugNetPrintf(int level, char* format, ...) 
+{
+	char msgbuf[0x800];
+	va_list args;
+	
+		if (level>logLevel)
+		return;
+       
+	va_start(args, format);
+       
+	sceClibVsnprintf(msgbuf,2048, format, args);
+	msgbuf[2047] = 0;
+	va_end(args);
+	switch(level)
+	{
+		case INFO:
+	    	debugNetUDPPrintf("[INFO]: %s",msgbuf);  
+	        break;
+	   	case ERROR: 
+	    	debugNetUDPPrintf("[ERROR]: %s",msgbuf);
+	        break;
+		case DEBUG:
+	        debugNetUDPPrintf("[DEBUG]: %s",msgbuf);
+	        break;
+		case NONE:
+			break;
+	    default:
+		    debugNetUDPPrintf("%s",msgbuf);
+       
+	}
+}
+
+void debugNetSetLogLevel(int level)
+{
+	logLevel=level;	
+}
+
+int debugNetInit(char *serverIp, int port, int level)
+{
+    int ret;
+    SceNetInitParam initparam;
+    SceNetCtlInfo info;
+
+    sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+
+	debugNetSetLogLevel(level);
+    if (debugnet_initialized) {
+        return debugnet_initialized;
+    }
+
+    /*net initialazation code from xerpi at https://github.com/xerpi/FTPVita/blob/master/ftp.c*/
+    /* Init Net */
+    if (sceNetShowNetstat() == SCE_NET_ERROR_ENOTINIT) {
+        net_memory = malloc(NET_INIT_SIZE);
+
+        initparam.memory = net_memory;
+        initparam.size = NET_INIT_SIZE;
+        initparam.flags = 0;
+
+        ret = sceNetInit(&initparam);
+        //printf("sceNetInit(): 0x%08X\n", ret);
+    } else {
+        //printf("Net is already initialized.\n");
+    }
+
+    /* Init NetCtl */
+    ret = sceNetCtlInit();
+    //printf("sceNetCtlInit(): 0x%08X\n", ret);
+   
+
+    /* Get IP address */
+    ret = sceNetCtlInetGetInfo(SCE_NETCTL_INFO_GET_IP_ADDRESS, &info);
+    //printf("sceNetCtlInetGetInfo(): 0x%08X\n", ret);
+
+
+    /* Save the IP of PSVita to a global variable */
+    sceNetInetPton(SCE_NET_AF_INET, info.ip_address, &vita_addr);
+
+	/* Create datagram udp socket*/
+    SocketFD = sceNetSocket("debugnet_socket",
+        SCE_NET_AF_INET , SCE_NET_SOCK_DGRAM, SCE_NET_IPPROTO_UDP);
+   
+    memset(&stSockAddr, 0, sizeof stSockAddr);
+
+    int broadcast = 1;
+    sceNetSetsockopt(SocketFD, SCE_NET_SOL_SOCKET, SCE_NET_SO_BROADCAST, &broadcast, sizeof(broadcast));
+	
+	/*Populate SceNetSockaddrIn structure values*/
+    stSockAddr.sin_family = SCE_NET_AF_INET;
+    stSockAddr.sin_port = sceNetHtons(port);
+    sceNetInetPton(SCE_NET_AF_INET, serverIp, &stSockAddr.sin_addr);
+
+	/*Show log on pc/mac side*/
+	debugNetUDPPrintf("debugnet initialized\n");
+
+	/*library debugnet initialized*/
+    debugnet_initialized = 1;
+
+    return debugnet_initialized;
+}
 
 static uint32_t current_buttons = 0, pressed_buttons = 0;
 SceDisplayFrameBuf framebuf;
@@ -158,11 +279,18 @@ int screenshots_thread(SceSize args, void *argp)
 	
 	sceIoMkdir("ux0:/data/screenshots", 0777);
 	
+	// Attaching game main thread
+	SceKernelThreadInfo status;
+	status.size = sizeof(SceKernelThreadInfo);
+	sceKernelGetThreadInfo(0x40010003, &status);
+	
 	// Getting title info
 	char titleid[16], title[256];
 	sceAppMgrAppParamGetString(0, 9, title , 256);
 	sceAppMgrAppParamGetString(0, 12, titleid , 256);
-
+	
+	ret = debugNetInit(ip_server, port_server, DEBUG);
+	
 	while (1)
 	{
 		SceCtrlData pad;
@@ -176,8 +304,7 @@ int screenshots_thread(SceSize args, void *argp)
 		{
 			menu_open = 1;
 		}
-		
-		if (menu_open)
+		else if (menu_open)
 		{
 			if (pressed_buttons & SCE_CTRL_SELECT)
 				menu_open = 0;
@@ -199,6 +326,8 @@ int screenshots_thread(SceSize args, void *argp)
 					char filename[256];
 					
 					sprintf(filename,"ux0:/data/screenshots/%s_%d%d_%d%d%d.tga",titleid,time.month,time.day,time.hour,time.minute,time.second);
+					
+					debugNetPrintf(DEBUG,filename,ret);
 					
 					SceUID _filBuf = sceIoOpen(filename, SCE_O_WRONLY | SCE_O_CREAT, 0777);					
 
@@ -231,7 +360,7 @@ int screenshots_thread(SceSize args, void *argp)
 			blit_stringf(336, 128, "Screenshot Plugin");			
 		}
 
-		sceDisplayWaitVblankStart();
+		//sceDisplayWaitVblankStart();
 	}
 
 	return 0;

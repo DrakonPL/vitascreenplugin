@@ -1,1 +1,1 @@
-ux0:plugins/amphetamin.suprx 1
+ux0:plugins/launcher.suprx 1

@@ -1,6 +1,6 @@
 TARGET  = amphetamin
-OBJS    = main.o blit.o font.o
-LIBS    = -lSceAppUtil_stub -lSceAppMgr_stub -lSceCtrl_stub -lSceDisplay_stub -lSceFios2_stub -lSceKernel_stub -lScePower_stub -lSceLibC_stub
+OBJS    = main.o blit.o font.o 
+LIBS    = -lSceSysmodule_stub -lSceAppUtil_stub -lSceAppMgr_stub -lSceCtrl_stub -lSceDisplay_stub -lSceFios2_stub -lSceKernel_stub -lSceNet_stub -lSceNetCtl_stub -lScePower_stub -lSceLibC_stub
 
 PREFIX  = arm-vita-eabi
 CC      = $(PREFIX)-gcc
